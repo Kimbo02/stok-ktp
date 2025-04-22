@@ -16,24 +16,28 @@ class Surat extends Model
         'tanggal',
         'template_surat',
         'file_pdf',
-        'nama_pengirim',
-        'nip_pengirim',
-        'jabatan_pengirim',
+        'link_ttd', // Menyimpan link pribadi tanda tangan (untuk QR)
     ];
 
     protected $casts = [
-        'tanggal' => 'date:Y-m-d', // default format simpan
+        'tanggal' => 'date:Y-m-d', // Format tanggal
     ];
 
-    // 🔎 Tambahan: accessor untuk tanggal yang diformat (misal untuk tampilan)
+    // Aksesor untuk format tanggal yang ditampilkan
     public function getTanggalFormattedAttribute(): string
     {
         return Carbon::parse($this->tanggal)->translatedFormat('d F Y');
     }
 
-    // 🔎 Tambahan: link download file PDF (kalau dibutuhkan)
+    // Aksesor untuk URL file PDF
     public function getPdfUrlAttribute(): ?string
     {
         return $this->file_pdf ? asset('storage/' . $this->file_pdf) : null;
+    }
+
+    // Aksesor untuk link_ttd (hindari pemanggilan rekursif)
+    public function getLinkTtdAttribute(): ?string
+    {
+        return $this->attributes['link_ttd'] ?? 'https://default-link.com';
     }
 }

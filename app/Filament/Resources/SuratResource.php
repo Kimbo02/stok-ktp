@@ -1,4 +1,5 @@
 <?php
+
 namespace App\Filament\Resources;
 
 use App\Models\Surat;
@@ -47,21 +48,13 @@ class SuratResource extends Resource
                 ->acceptedFileTypes(['application/pdf'])
                 ->preserveFilenames()
                 ->hint('Kosongkan jika ingin digenerate otomatis'),
-
-            TextInput::make('nama_pengirim')
-                ->label('Nama Pengirim')
+            
+            TextInput::make('link_ttd')
+                ->label('Link TTD (untuk QR Code)')
                 ->required()
+                ->url()
                 ->maxLength(255),
-
-            TextInput::make('nip_pengirim')
-                ->label('NIP Pengirim')
-                ->required()
-                ->maxLength(30),
-
-            TextInput::make('jabatan_pengirim')
-                ->label('Jabatan Pengirim')
-                ->required()
-                ->maxLength(255),
+            
         ]);
     }
 

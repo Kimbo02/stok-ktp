@@ -8,7 +8,9 @@ use Illuminate\Support\Facades\Storage;
 use PhpOffice\PhpWord\TemplateProcessor;
 use Illuminate\Support\Str;
 use Carbon\Carbon;
-use SimpleSoftwareIO\QrCode\Facades\QrCode;
+use chillerlan\QRCode\QRCode;
+use chillerlan\QRCode\QROptions;
+use Intervention\Image\Facades\Image;
 use Ilovepdf\Ilovepdf;
 
 class CreateSurat extends CreateRecord
@@ -18,49 +20,53 @@ class CreateSurat extends CreateRecord
     protected function afterCreate(): void
     {
         $surat = $this->record;
-        $tanggalFormatted = Carbon::parse($surat->tanggal)->translatedFormat('d F Y');
-
-        if (empty($surat->template_surat)) return;
-
-        $templateFullPath = Storage::path('public/' . $surat->template_surat);
-        if (!file_exists($templateFullPath)) return;
-
-        // ✅ Generate QR Code
-        $qrContent = "Nama: {$surat->nama_pengirim}\nNIP: {$surat->nip_pengirim}\nJabatan: {$surat->jabatan_pengirim}";
-        $qrTempPath = storage_path('app/public/temp_qr_' . Str::slug($surat->nama_pengirim) . '.png');
-        $logoPath = storage_path('app/public/logo.png');
-
-        if (file_exists($logoPath)) {
-            ob_start();
-            $qrImage = QrCode::format('png')->size(300)->errorCorrection('H')
-                ->merge($logoPath, 0.3, true)->generate($qrContent);
-            ob_end_clean();
-            file_put_contents($qrTempPath, $qrImage);
-        } else {
-            QrCode::format('png')->size(300)->errorCorrection('H')->generate($qrContent, $qrTempPath);
-        }
 
         try {
-            // ✅ Proses Template
+            $tanggalFormatted = Carbon::parse($surat->tanggal)->translatedFormat('d F Y');
+
+            if (empty($surat->template_surat)) return;
+
+            $templateFullPath = Storage::path('public/' . $surat->template_surat);
+            if (!file_exists($templateFullPath)) return;
+
+            $qrContent = $surat->link_ttd ?: 'https://default-link.com';
+            $qrPath = storage_path('app/public/temp_qr_' . Str::uuid() . '.png');
+            $logoPath = storage_path('app/public/LogoPemkot.png');
+
+            // QR options & generate PNG to file directly
+            $options = new QROptions([
+                'outputType' => QRCode::OUTPUT_IMAGE_PNG,
+                'eccLevel' => QRCode::ECC_H,
+                'scale' => 10,
+            ]);
+            (new QRCode($options))->render($qrContent, $qrPath);
+
+            // Insert logo using Intervention
+            if (file_exists($logoPath)) {
+                $qrImage = Image::make($qrPath);
+                $logo = Image::make($logoPath)->resize(100, 100);
+                $qrImage->insert($logo, 'center');
+                $qrImage->save($qrPath);
+            }
+
+            // Isi template Word
             $processor = new TemplateProcessor($templateFullPath);
             $processor->setValue('nomor_naskah', $surat->nomor_surat);
             $processor->setValue('tanggal_naskah', $tanggalFormatted);
 
-            if (file_exists($qrTempPath)) {
+            if (file_exists($qrPath)) {
                 $processor->setImageValue('ttd_pengirim', [
-                    'path' => $qrTempPath,
-                    'width' => 100,
-                    'height' => 100,
+                    'path' => $qrPath,
+                    'width' => 110,
+                    'height' => 110,
                     'ratio' => false,
                 ]);
             }
 
-            // ✅ Simpan file Word
             $filenameDocx = 'surat_' . Str::slug($surat->nomor_surat) . '.docx';
             $pathDocx = Storage::path('public/surats/' . $filenameDocx);
             $processor->saveAs($pathDocx);
 
-            // ✅ Konversi ke PDF pakai iLovePDF
             $filenamePdf = str_replace('.docx', '.pdf', $filenameDocx);
             $pdfFullPath = Storage::path('public/surats/' . $filenamePdf);
 
@@ -70,24 +76,16 @@ class CreateSurat extends CreateRecord
             $task->execute();
             $task->download(dirname($pdfFullPath));
 
-            // Simpan path PDF ke database
             $surat->file_pdf = 'surats/' . $filenamePdf;
             $surat->save();
 
-            // Tambahkan pengecekan PDF
-            if (!Storage::exists('public/' . $surat->file_pdf)) {
-                logger()->error('PDF file not found', ['pdfPath' => $surat->file_pdf]);
-            } else {
-                logger()->info('PDF file found', ['pdfPath' => $surat->file_pdf]);
-            }
-
-            // ✅ Hapus QR sementara
-            if (file_exists($qrTempPath)) {
-                unlink($qrTempPath);
+            if (file_exists($qrPath)) {
+                unlink($qrPath);
             }
 
         } catch (\Exception $e) {
-            logger()->error('Error saat membuat surat: ' . $e->getMessage());
+            logger()->error('Gagal membuat surat: ' . $e->getMessage());
+            throw $e;
         }
     }
 }
