@@ -11,7 +11,6 @@ use Carbon\Carbon;
 use chillerlan\QRCode\QRCode;
 use chillerlan\QRCode\QROptions;
 use Intervention\Image\Facades\Image;
-use Ilovepdf\Ilovepdf;
 
 class EditSurat extends EditRecord
 {
@@ -33,6 +32,7 @@ class EditSurat extends EditRecord
             $qrPath = storage_path('app/public/temp_qr_' . Str::uuid() . '.png');
             $logoPath = storage_path('app/public/LogoPemkot.png');
 
+            // Generate QR Code
             $options = new QROptions([
                 'outputType' => QRCode::OUTPUT_IMAGE_PNG,
                 'eccLevel' => QRCode::ECC_H,
@@ -40,6 +40,7 @@ class EditSurat extends EditRecord
             ]);
             (new QRCode($options))->render($qrContent, $qrPath);
 
+            // Insert logo into QR Code
             if (file_exists($logoPath)) {
                 $qrImage = Image::make($qrPath);
                 $logo = Image::make($logoPath)->resize(100, 100);
@@ -47,10 +48,12 @@ class EditSurat extends EditRecord
                 $qrImage->save($qrPath);
             }
 
+            // Isi template Word
             $processor = new TemplateProcessor($templateFullPath);
             $processor->setValue('nomor_naskah', $surat->nomor_surat);
             $processor->setValue('tanggal_naskah', $tanggalFormatted);
 
+            // Insert QR Code into template
             if (file_exists($qrPath)) {
                 $processor->setImageValue('ttd_pengirim', [
                     'path' => $qrPath,
@@ -60,22 +63,40 @@ class EditSurat extends EditRecord
                 ]);
             }
 
+            // Save DOCX file
             $filenameDocx = 'surat_' . Str::slug($surat->nomor_surat) . '.docx';
             $pathDocx = Storage::path('public/surats/' . $filenameDocx);
             $processor->saveAs($pathDocx);
 
+            // Konversi DOCX ke PDF menggunakan LibreOffice
             $filenamePdf = str_replace('.docx', '.pdf', $filenameDocx);
             $pdfFullPath = Storage::path('public/surats/' . $filenamePdf);
 
-            $ilovepdf = new Ilovepdf(env('ILOVEPDF_PUBLIC_KEY'), env('ILOVEPDF_SECRET_KEY'));
-            $task = $ilovepdf->newTask('officepdf');
-            $task->addFile($pathDocx);
-            $task->execute();
-            $task->download(dirname($pdfFullPath));
+            // Path ke LibreOffice soffice.exe
+            $soffice = '"C:\Program Files\LibreOffice\program\soffice.exe"';
 
+            // Perintah konversi dari DOCX ke PDF
+            $command = sprintf(
+                '%s --headless --convert-to pdf "%s" --outdir "%s"',
+                $soffice,
+                $pathDocx,
+                Storage::path('public/surats')
+            );
+
+            // Jalankan perintah menggunakan exec
+            exec($command, $output, $status);
+
+            // Periksa hasil eksekusi
+            if ($status !== 0) {
+                logger()->error('Gagal mengonversi DOCX ke PDF: ' . implode("\n", $output));
+                return;
+            }
+
+            // Update file PDF path di database
             $surat->file_pdf = 'surats/' . $filenamePdf;
             $surat->save();
 
+            // Hapus file QR setelah digunakan
             if (file_exists($qrPath)) {
                 unlink($qrPath);
             }

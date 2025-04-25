@@ -11,7 +11,6 @@ use Carbon\Carbon;
 use chillerlan\QRCode\QRCode;
 use chillerlan\QRCode\QROptions;
 use Intervention\Image\Facades\Image;
-use Ilovepdf\Ilovepdf;
 
 class CreateSurat extends CreateRecord
 {
@@ -67,14 +66,28 @@ class CreateSurat extends CreateRecord
             $pathDocx = Storage::path('public/surats/' . $filenameDocx);
             $processor->saveAs($pathDocx);
 
+            // Konversi DOCX ke PDF menggunakan LibreOffice
             $filenamePdf = str_replace('.docx', '.pdf', $filenameDocx);
             $pdfFullPath = Storage::path('public/surats/' . $filenamePdf);
 
-            $ilovepdf = new Ilovepdf(env('ILOVEPDF_PUBLIC_KEY'), env('ILOVEPDF_SECRET_KEY'));
-            $task = $ilovepdf->newTask('officepdf');
-            $task->addFile($pathDocx);
-            $task->execute();
-            $task->download(dirname($pdfFullPath));
+            // Path ke LibreOffice soffice.exe
+            $soffice = '"C:\Program Files\LibreOffice\program\soffice.exe"';
+
+            // Perintah konversi dari DOCX ke PDF
+            $command = sprintf(
+                '%s --headless --convert-to pdf "%s" --outdir "%s"',
+                $soffice,
+                $pathDocx,
+                Storage::path('public/surats')
+            );
+
+            // Jalankan perintah menggunakan exec
+            exec($command, $output, $status);
+
+            if ($status !== 0) {
+                logger()->error('Gagal mengonversi DOCX ke PDF: ' . implode("\n", $output));
+                return;
+            }
 
             $surat->file_pdf = 'surats/' . $filenamePdf;
             $surat->save();
